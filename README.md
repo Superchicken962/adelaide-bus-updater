@@ -10,4 +10,5 @@ Setup
 -Requires Node.js (tested on v20.9.0)  
 -Recommended to use pm2 to run  
 -Run 'npm install' to install all dependencies  
--Make sure to configure database.json to add database information before running!
+-Run 'node update_vehicles_database_v2.js' or 'npm start' to start the script. (If not running with pm2)  
+-Make sure to configure database.json to add database information before running!  
