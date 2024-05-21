@@ -1,2 +1,7 @@
 # adelaide-bus-updater
-Script to automatically update Adelaide public transport information. 
+Script to automatically update Adelaide public transport information.  
+
+Not much to say, it runs 55 times before ending in which I recommend using pm2 to have it restart automatically.  
+Includes two database tables that you can just import into your database.  
+
+This is just a script for updating the data, if you just want to see the data visualised, my website does it here: https://apt.markgurney.dev/
