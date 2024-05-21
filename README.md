@@ -10,3 +10,4 @@ Setup
 -Requires Node.js (tested on v20.9.0)  
 -Recommended to use pm2 to run  
 -Run 'npm install' to install all dependencies  
+-Make sure to configure database.json to add database information before running!
