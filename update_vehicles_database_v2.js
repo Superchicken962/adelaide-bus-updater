@@ -383,12 +383,31 @@ function updateLastSeenVehicles() {
     
                     previous_trips.push(prev_trip_info);
                     
+                    // This info will be stored to the database item IF this is the first time the vehicle has been "seen."
+                    const firstSeen = {
+                        "trip": {
+                            "id": prev_trip_info.tripId,
+                            "route": prev_trip_info.routeId,
+                            "headsign": prev_trip_info.tripHeadsign
+                        },
+                        "vehicle": {
+                            "id": info.vehicle_id,
+                            "type": info.vehicle_type
+                        },
+                        "timestamp": info.timestamp,
+                        "route": {
+                            "color": prev_trip_info.routeColour,
+                            "text_color": prev_trip_info.routeTextColour
+                        }
+                    };
+
                     DatabasePool.getConnection((err, conn) => {
                         if (err) {
                             process.exit(err.code);
                         }
-                        var query = "INSERT INTO fleetlist_lastseen (bus_num, vehicle_type, chassis, body, livery, operator, lastseen_timestamp, lastseen, previous_trips) VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE bus_num = ?, lastseen_timestamp = ?, lastseen = ?, previous_trips = ?;"; // if the row exists, simply update it's lastseen info. If not, create a new row for the vehicle.
-                        conn.query(query, [info.vehicle_id, info.vehicle_type, "N/A", "N/A", "N/A", "N/A", info.timestamp, JSON.stringify(info), JSON.stringify(previous_trips), info.vehicle_id, info.timestamp, JSON.stringify(info), JSON.stringify(previous_trips)], (err, results) => {
+                        // Add vehicle to database if it does not exist, OR just update some values if it does. Eg. lastseen data is updated each time, while firstseen data is only updated when a new vehicle is added.
+                        const query = "INSERT INTO fleetlist_lastseen (bus_num, vehicle_type, chassis, body, livery, operator, lastseen_timestamp, lastseen, previous_trips, firstseen_timestamp, firstseen) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE bus_num = ?, lastseen_timestamp = ?, lastseen = ?, previous_trips = ?;"; // if the row exists, simply update it's lastseen info. If not, create a new row for the vehicle.
+                        conn.query(query, [info.vehicle_id, info.vehicle_type, "N/A", "N/A", "N/A", "N/A", info.timestamp, JSON.stringify(info), JSON.stringify(previous_trips), firstSeen.timestamp, JSON.stringify(firstSeen), info.vehicle_id, info.timestamp, JSON.stringify(info), JSON.stringify(previous_trips)], (err, results) => {
                             conn.release();
                             // console.clear();
                             // console.log(`Updating vehicles... (${i}/${feed.entity.length})`);

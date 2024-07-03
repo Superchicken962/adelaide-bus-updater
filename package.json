@@ -12,7 +12,7 @@
     "request": "^2.88.2"
   },
   "name": "adelaide-bus-info-database",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "holds information about all buses in adelaide and their last whereabouts",
   "main": "update_vehicles_database_v2.js",
   "scripts": {
