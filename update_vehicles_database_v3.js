@@ -1,16 +1,17 @@
-// this is a newer newer version of the file
-// Run this with PM2, as the script will run once then end to prevent database timeouts
+// Version 3 of script - mostly just v2 with some updated code quality.
+// Requires config.json, static-files.js and online_database.json files.
 // Made by Mark Gurney 2024
 
 const request = require("request");
 const protos = require("google-proto-files");
 const mysql = require("mysql");
-const { updateStaticFiles, getStaticFile, getStaticFileSync, getStopTimesByTripId, getStopTimesForTrips } = require("./static-files");
-const dbInfo = require("./online_database.json");
+const { updateStaticFiles, getStaticFileSync, getStopTimesForTrips } = require("./static-files");
 const es = require("event-stream");
 const fs = require("node:fs");
+const isProduction = !!require("./config.json").production;
 
-const DatabasePool = mysql.createPool(dbInfo);
+// Pool will be initialised when we confirm there is stuff to edit so we do not waste connections.
+let DatabasePool = null;
 
 const ScriptRerunTimeout = 50000;
 const ScriptMaxRunsBeforeExit = 55; // 0 for no limit
@@ -18,39 +19,59 @@ let ScriptTimesRan = 0;
 
 let stopTimes = {};
 
+function createDatabasePool() {
+    const databaseInfo = (isProduction) ? require("./online_database.json") : require("./database.json");
+    return mysql.createPool(databaseInfo);
+}
+
+Main();
+
 function Main() {
-    // wait until static files have been checked/updated then update last seen
     updateStaticFiles().then(async(err) => {
         if (err) {
             console.log("Error in static file updating process: ", err);
+            setTimeout(() => {
+                process.exit(0);
+            }, 180000);
+            return;
+        }
+
+        const hasLiveData = await isThereLiveData();
+
+        if (!hasLiveData) {
+            console.log("No live data - nothing to update. Ending process in 3 minutes.");
+            setTimeout(() => {
+                process.exit(0);
+            }, 18000);
+            return;
+        }
+
+        // Check if this is the first time the script is being run as we don't want to create a pool each time it updates.
+        if (ScriptTimesRan === 0) {
+            DatabasePool = createDatabasePool();
         }
 
         console.log("Cleansing Basic Trip Updates...");
-
         await cleanseTripUpdatesDatabase();
-
         console.log("Cleansed Basic Trip Updates Table\n");
+
         console.log("Reading Stop Times...");
-
         stopTimes = await readAndStoreStopTimes();
-
         console.log("Read and Stored Stop Times\n");
+
         console.log("Updating Last Seen Vehicles...");
-
         await updateLastSeenVehicles();
-
         console.log("Updated Last Seen Vehicles\n");
+
         console.log("Updating Trip Updates...");
-
         await updateTripUpdates();
-
         console.log("Updated Basic Trip Updates");
 
         ScriptTimesRan += 1;
 
         if ((ScriptMaxRunsBeforeExit > 0) && (ScriptTimesRan >= ScriptMaxRunsBeforeExit)) {
-            console.log("Script has been run 50 times! Exiting process... (Please ensure automatic reopening)");
-            process.exit();
+            console.log(`Script has been run ${ScriptMaxRunsBeforeExit} times! Exiting process... (Please ensure automatic reopening)`);
+            process.exit(0);
         }
 
         console.log(`Finished script! Re-running in ${(ScriptRerunTimeout/1000)}s. [Script has run ${ScriptTimesRan}${(ScriptMaxRunsBeforeExit > 0) ? "/"+ScriptMaxRunsBeforeExit : ""} time(s)]`);
@@ -59,8 +80,6 @@ function Main() {
         }, ScriptRerunTimeout);
     });
 }
-
-Main();
 
 const decodeProto = async(buffer) => {
     return new Promise(async(resolve, reject) => {
@@ -138,8 +157,6 @@ async function updateTripUpdates() {
                         let dt = new Date(parseInt(i.timestamp));
                         let diff = Math.abs(now - dt);
     
-                        // console.log(i.id +" : "+ diff);
-    
                         // hours difference less than 18 (if it is true, then do not replace)
                         return {id: i.id, lessThan18HrsAgo: Math.floor(diff/1000/60/60) < 18};
                     });
@@ -148,8 +165,6 @@ async function updateTripUpdates() {
                     let findTrip = lastThreeVehicles_Timestamps.filter(t => t.id === trip.tripUpdate.vehicle.id);
                     findTrip = findTrip[findTrip.length - 1];
                 
-                    // console.log(findTrip);
-    
                     // check if it has been at least 18 hours and add vehicle if it has been (or if it does not exist)
                     if (!findTrip || findTrip.lessThan18HrsAgo !== true) {
                         lastThreeVehicles.push({id: trip.tripUpdate.vehicle.id, timestamp: Date.now()});
@@ -221,11 +236,6 @@ async function updateTripUpdates() {
     });
 }
 
-const updateinterval = 5 // minutes
-const error_retry = 30; // minutes
-
-const novehiclesfound_recheck_interval = 15; // minutes
-
 function updateLastSeenVehicles() {
     return new Promise((resolve, reject) => {
         // console.log("Preparing to update vehicles...");
@@ -260,6 +270,7 @@ function updateLastSeenVehicles() {
     
             const routes_txt = getStaticFileSync("routes.txt");
             const trips_txt = getStaticFileSync("trips.txt");
+            const agencyData = formatAgencyData(getStaticFileSync("agency.txt"));
     
             for (const vehicle of feed.entity) {
                 promiseArray.push(new Promise(async (resolve, reject) => { // push this promise into the array, and resolve it when the query is finished.
@@ -276,9 +287,7 @@ function updateLastSeenVehicles() {
                         vehicle_type: type
                     };
     
-                    // let database_vehicle = allvehicles.filter(vehicle => vehicle.bus_num === info.vehicle_id)[0];
                     let database_vehicle = await getVehicleFromDatabase(info.vehicle_type, info.vehicle_id);
-                    // console.log(database_vehicle);
                     
                     let previous_trips = [];
     
@@ -312,15 +321,7 @@ function updateLastSeenVehicles() {
                     let statictrip = getTripById(vehicle.vehicle.trip.tripId, trips_txt);
                     let staticroute = getRouteById(vehicle.vehicle.trip.routeId, routes_txt);
                     
-                    // let stop = stops.filter(s => s.substr(0, vehicle.vehicle.trip.tripId.length) === vehicle.vehicle.trip.tripId);
-    
-                    // let first_stop = stop.filter(s => s.split(",")[4] === "0")[0];
-                    // let last_stop = stop.filter(s => s.split(",")[4] === "999")[0];
-    
-                    // let stop = await getStopTimesByTripId(vehicle.vehicle.trip.tripId);
-    
                     let tripstops = all_stop_times[vehicle.vehicle.trip.tripId]; // fetch the stop times for our trip from the object of all stop times
-                    // console.log(tripstops);
     
                     let prev_trip_info = {
                         tripId: vehicle.vehicle.trip.tripId,
@@ -401,13 +402,28 @@ function updateLastSeenVehicles() {
                         }
                     };
 
+                    let operatorToSet = null;
+
+                    // Handle operator
+                    if (staticroute.agency_id) {
+                        let findOperator = agencyData.find(agency => agency.agency_id === staticroute.agency_id);
+                        
+                        if (findOperator) {
+                            operatorToSet = findOperator.agency_simple_name;
+                        }
+                    }
+
                     DatabasePool.getConnection((err, conn) => {
                         if (err) {
                             process.exit(err.code);
                         }
+
                         // Add vehicle to database if it does not exist, OR just update some values if it does. Eg. lastseen data is updated each time, while firstseen data is only updated when a new vehicle is added.
-                        const query = "INSERT INTO fleetlist_lastseen (bus_num, vehicle_type, chassis, body, livery, operator, lastseen_timestamp, lastseen, previous_trips, firstseen_timestamp, firstseen) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE bus_num = ?, lastseen_timestamp = ?, lastseen = ?, previous_trips = ?;"; // if the row exists, simply update it's lastseen info. If not, create a new row for the vehicle.
-                        conn.query(query, [info.vehicle_id, info.vehicle_type, "N/A", "N/A", "N/A", "N/A", info.timestamp, JSON.stringify(info), JSON.stringify(previous_trips), firstSeen.timestamp, JSON.stringify(firstSeen), info.vehicle_id, info.timestamp, JSON.stringify(info), JSON.stringify(previous_trips)], (err, results) => {
+                        const query = `INSERT INTO fleetlist_lastseen (bus_num, vehicle_type, chassis, body, livery, operator, lastseen_timestamp, lastseen, previous_trips, firstseen_timestamp, firstseen) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE bus_num = ?, lastseen_timestamp = ?, lastseen = ?, previous_trips = ?${operatorToSet ? ', operator = ?' : ''};`;
+                        const queryParams = [info.vehicle_id, info.vehicle_type, "N/A", "N/A", "N/A", (operatorToSet ? operatorToSet : "N/A"), info.timestamp, JSON.stringify(info), JSON.stringify(previous_trips), firstSeen.timestamp, JSON.stringify(firstSeen), info.vehicle_id, info.timestamp, JSON.stringify(info), JSON.stringify(previous_trips)];
+                        if (operatorToSet) queryParams.push(operatorToSet);
+                        
+                        conn.query(query, queryParams, (err, results) => {
                             conn.release();
                             // console.clear();
                             // console.log(`Updating vehicles... (${i}/${feed.entity.length})`);
@@ -457,6 +473,7 @@ function getVehicleTypeByRoute(route) {
         "OUTHA",
         "SALIS",
         "SEAFRD",
+        "PTDOCK"
     ];
 
     let type;
@@ -472,18 +489,19 @@ function getVehicleTypeByRoute(route) {
     return type;
 }
 
-function getTripById(tripid, filedata) {
-    let file = filedata;
-    if (!filedata) {
-        file = getStaticFileSync("trips.txt");
+function getTripById(tripId, fileContent) {
+    if (!fileContent) {
+        fileContent = getStaticFileSync("trips.txt");
     }
-    let trips = file.split("\r\n");
-    let trip = trips.filter(trip => trip.split(",")[2] === tripid.toString());
-    if (trip.length === 0) {
-        return null;
-    }
-    trip = trip[0].split(",");
-    let tripobj = {
+
+    const trips = fileContent.split("\r\n");
+    let trip = trips.find(trip => trip.split(",")[2] === tripId.toString());
+
+    if (!trip) return null;
+
+    trip = trip.split(",");
+
+    const tripobj = {
         "route_id" : trip[0],
         "service_id" : trip[1],
         "trip_id" : trip[2],
@@ -494,56 +512,58 @@ function getTripById(tripid, filedata) {
         "shape_id" : trip[7],
         "wheelchair_accessible" : trip[8]
     };
+
     return tripobj;
 }
 
-function getRouteById(routeid, filedata) {
-    let file = filedata;
-    if (!filedata) {
-        file = getStaticFileSync("routes.txt");
-    }
-    let routes = file.split("\r\n");
-    let route = routes.filter(route => route.split(",")[0] === routeid.toString());
-    if (route.length === 0) {
-        return null;
+function getRouteById(routeId, fileContent) {
+    if (!fileContent) {
+        fileContent = getStaticFileSync("routes.txt");
     }
 
-    let second = ((route[0].split('"'))[1]).replaceAll(",", "&#44;");
-    let pre = [route[0].split('"')[0]];
-    pre.push(second);
-    pre.push(route[0].split('"')[2]);
-    let final = (pre.join("")).split(",");
-    let routeobj = {
-        "route_id" : final[0],
-        "agency_id" : final[1],
-        "route_short_name" : final[2],
-        "route_long_name" : final[3],
-        "route_desc" : (final[4].replaceAll("&#44;", ",")),
-        "route_type" : final[5],
-        "route_url" : final[6],
-        "route_color" : final[7],
-        "route_text_color" : final[8],
-        "RouteGroup" : final[9]
+    let routes = fileContent.split("\r\n");
+    let route = routes.find(route => route.split(",")[0] === routeId.toString());
+    if (!route) return null;
+
+    const data = splitFileText(route);
+
+    const routeobj = {
+        "route_id" : data[0],
+        "agency_id" : data[1],
+        "route_short_name" : data[2],
+        "route_long_name" : data[3],
+        "route_desc" : (data[4].replaceAll("&#44;", ",")),
+        "route_type" : data[5],
+        "route_url" : data[6],
+        "route_color" : data[7],
+        "route_text_color" : data[8],
+        "RouteGroup" : data[9]
     };
 
     return routeobj;
 }
 
-function getAllVehiclesInDatabase() {
-    return new Promise(async(resolve, reject) => {
+/**
+ * Format text file row into array of data - handles commas inside quotation marks. Fixes error that was occuring when reading routes without descriptions.
+ * @param { string } string - String to split
+ * @returns { string[] } Array of data
+ */
+function splitFileText(string = "") {
+    // Seperate the string into 3 parts, with the second part being the description in quotes.
+    const seperatedString = string.split('"');
 
-        const conn = await getDatabaseConnection();
+    // If there were no quotation marks to split, then just return the original string split by a comma.
+    if (seperatedString.length <= 1) {
+        return string.split(",");
+    }
 
-        conn.query("SELECT bus_num, lastseen, previous_trips FROM fleetlist_lastseen", (error, results, fields) => {
-            if (error) {
-                throw error;
-            };
+    // Replace commas with html character code so any commas in the quotes will not affect the final split by comma into data.
+    const middlePart = seperatedString[1]?.replaceAll(",", "&#44;");
 
-            resolve(results);
-            conn.release();
-        });
-        
-    });
+    const finalString = seperatedString[0] + middlePart + seperatedString?.[2];
+
+    // Return split array of lines + replace the HTML encoded character with a comma.
+    return finalString.split(",").map(line => line.replaceAll("&#44;", ","));
 }
 
 function getVehicleFromDatabase(vehicle_type, vehicle_id) {
@@ -610,4 +630,82 @@ function readAndStoreStopTimes() {
             resolve(result);
         });
     });
+}
+
+/**
+ * Check if live data exists - are there any live trip updates, or vehicle positions?
+ * @returns { Promise<Boolean> } Is there live data?
+ */
+function isThereLiveData() {
+    return new Promise(async(resolve) => {
+        const vehiclesLength = await returnFeedEntityLength("https://gtfs.adelaidemetro.com.au/v1/realtime/vehicle_positions");
+        const tripsLength = await returnFeedEntityLength();
+    
+        const liveDataExists = (vehiclesLength > 2 || tripsLength > 2);
+        resolve(liveDataExists);
+    });
+}
+
+function returnFeedEntityLength(url = "https://gtfs.adelaidemetro.com.au/v1/realtime/vehicle_positions") {
+    return new Promise((resolve) => {
+        const options = {
+            method: "GET",
+            url: url,
+            encoding: null
+        };
+    
+        request(options, async function (err, res, body) {
+            if (err || res.statusCode !== 200) {
+                throw new Error("There was an error fetching data.");
+            }
+    
+            const feed = await decodeProto(body); // decode the protocol buffer
+    
+            resolve(feed.entity.length);
+        });
+    });
+}
+
+/**
+ * 
+ * @param { string } fileContent - File content from agency.txt 
+ * @param { string } return_as - Return as 'object' or 'array' - default: 'array'
+ */
+function formatAgencyData(fileContent = "") {
+    // Trim removes any empty new lines that would return empty data.
+    const data = fileContent?.trim().split("\r\n");
+    
+    // Remove the column names from the data.
+    data.shift();
+
+    const agencyData = [];
+
+    for (const agency of data) {
+        let string = agency.split(",");
+
+        let info = {
+            agency_id: string[0],
+            agency_name: string[1],
+            agency_simple_name: formatAgencyName(string[1]),
+            agency_url: string[2],
+            agency_timezone: string[3],
+            agency_lang: string[4],
+            agency_phone: string[5],
+            agency_fare_url: string[6]
+        }
+
+        agencyData.push(info);
+    }
+
+    return agencyData;
+}
+
+function formatAgencyName(agency_name = "") {
+    // Try and isolate the name to be just the agency name. ie. 'Torrens Transit'. Remove all brackets and "Adelaide Metro" occurences.
+    agency_name = agency_name.replaceAll("Adelaide Metro", "").replaceAll("(", "").replaceAll(")", "");
+    
+    // Remove "School" and "Industrial" parts of agency name.
+    agency_name = agency_name.replaceAll("School Service -", "").replaceAll("Industrial Service -", "");
+    
+    return agency_name.trim();
 }
