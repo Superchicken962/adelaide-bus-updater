@@ -367,7 +367,7 @@ function cleanseLastSeenVehicles() {
                                 SELECT id FROM lastseen
                                 WHERE vehicleId = ? AND vehicleType = ?
                                 ORDER BY timestamp DESC
-                                LIMIT 5
+                                LIMIT 12
                             ) AS a
                         ) AND vehicleId = ? AND vehicleType = ?;
                     `;
