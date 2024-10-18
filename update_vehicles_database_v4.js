@@ -147,6 +147,7 @@ function updateTrips() {
             const tripsTxt = getStaticFileSync("trips.txt");
 
             const queryErrors = [];
+            const conn = await getDatabaseConnection();
 
             await Promise.all(feed.entity.map(async(trip) => {
                 let tripId = trip.tripUpdate.trip.tripId;
@@ -174,8 +175,6 @@ function updateTrips() {
                 let tripTs = trip.tripUpdate.timestamp.low*1000;
 
                 const tripVehicleQueryParams = [tripId, vehicleId, vehicleType, tripTs, vehicleId, vehicleType, tripTs];
-
-                const conn = await getDatabaseConnection();
 
                 // Perform both queries and push any errors to the array. Resolve once the second is finished.
                 await new Promise(r => {
@@ -499,42 +498,6 @@ function splitFileText(string = "") {
 
     // Return split array of lines + replace the HTML encoded character with a comma.
     return finalString.split(",").map(line => line.replaceAll("&#44;", ","));
-}
-
-function getVehicleFromDatabase(vehicle_type, vehicle_id) {
-    return new Promise(async(resolve, reject) => {
-
-        const conn = await getDatabaseConnection();
-
-        conn.query("SELECT * FROM fleetlist_lastseen WHERE bus_num = ? AND vehicle_type = ?;", [vehicle_id, vehicle_type], (error, results, fields) => {
-            if (error) {
-                throw error;
-            };
-
-            resolve(results[0]);
-            conn.release();
-        });
-        
-    });
-}
-
-function getBasicTripInfoFromDatabaseForAll(columns) {
-    return new Promise(async(resolve, reject) => {
-
-        if (!columns) columns = "*";
-
-        const conn = await getDatabaseConnection();
-
-        conn.query("SELECT "+columns+" FROM basic_trip_updates", (error, results, fields) => {
-            if (error) {
-                throw error;
-            };
-
-            resolve(results);
-            conn.release();
-        });
-        
-    });
 }
 
 function getDatabaseConnection() {
