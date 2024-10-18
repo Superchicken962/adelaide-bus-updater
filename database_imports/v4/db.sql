@@ -18,49 +18,8 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 --
--- Database: `adelaide_bus_site_new`
+-- Database: `adelaide_bus_tracker`
 --
-
--- --------------------------------------------------------
-
---
--- Table structure for table `contributorapplications`
---
-
-CREATE TABLE `contributorapplications` (
-  `id` int(11) NOT NULL,
-  `authorId` varchar(255) NOT NULL,
-  `authorName` varchar(100) NOT NULL,
-  `authorEmail` varchar(100) NOT NULL,
-  `notifyIfSuccessful` tinyint(1) NOT NULL,
-  `question_why` text NOT NULL,
-  `question_knowledge` text NOT NULL,
-  `submission_date` varchar(50) NOT NULL,
-  `status` varchar(20) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- --------------------------------------------------------
-
---
--- Table structure for table `favouritestops`
---
-
-CREATE TABLE `favouritestops` (
-  `userId` varchar(255) NOT NULL,
-  `stopId` varchar(255) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- --------------------------------------------------------
-
---
--- Table structure for table `favouritevehicles`
---
-
-CREATE TABLE `favouritevehicles` (
-  `userId` varchar(255) NOT NULL,
-  `vehicleId` int(11) NOT NULL,
-  `vehicleType` varchar(15) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
@@ -154,35 +113,6 @@ CREATE TABLE `tripvehicles` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `users`
---
-
-CREATE TABLE `users` (
-  `id` varchar(255) NOT NULL,
-  `name` text NOT NULL,
-  `email` text NOT NULL,
-  `password` text NOT NULL,
-  `registerDate` text NOT NULL,
-  `isAdmin` tinyint(1) NOT NULL,
-  `isContributor` tinyint(1) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- --------------------------------------------------------
-
---
--- Table structure for table `usertokens`
---
-
-CREATE TABLE `usertokens` (
-  `userId` varchar(255) NOT NULL,
-  `token` varchar(255) NOT NULL,
-  `creation_date` date NOT NULL,
-  `last_used` date NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- --------------------------------------------------------
-
---
 -- Table structure for table `vehicles`
 --
 
@@ -200,54 +130,8 @@ CREATE TABLE `vehicles` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `vehiclesoutofservice`
---
-
-CREATE TABLE `vehiclesoutofservice` (
-  `type` text NOT NULL,
-  `id` text NOT NULL,
-  `hide` tinyint(1) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
---
--- Dumping data for table `vehiclesoutofservice`
---
-
-INSERT INTO `vehiclesoutofservice` (`type`, `id`, `hide`) VALUES
-('bus', '240', 0),
-('bus', '241', 0),
-('bus', '246', 0),
-('bus', '247', 0),
-('bus', '266', 0),
-('bus', '267', 0),
-('bus', '2205', 0),
-('bus', '3269', 0),
-('bus', '3270', 0),
-('bus', '3310', 0),
-('bus', '3311', 0);
-
---
 -- Indexes for dumped tables
 --
-
---
--- Indexes for table `contributorapplications`
---
-ALTER TABLE `contributorapplications`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `authorId` (`authorId`);
-
---
--- Indexes for table `favouritestops`
---
-ALTER TABLE `favouritestops`
-  ADD PRIMARY KEY (`userId`,`stopId`);
-
---
--- Indexes for table `favouritevehicles`
---
-ALTER TABLE `favouritevehicles`
-  ADD PRIMARY KEY (`userId`,`vehicleId`,`vehicleType`);
 
 --
 -- Indexes for table `firstseen`
@@ -281,18 +165,6 @@ ALTER TABLE `tripvehicles`
   ADD PRIMARY KEY (`tripId`,`vehicleId`,`vehicleType`);
 
 --
--- Indexes for table `users`
---
-ALTER TABLE `users`
-  ADD PRIMARY KEY (`id`);
-
---
--- Indexes for table `usertokens`
---
-ALTER TABLE `usertokens`
-  ADD PRIMARY KEY (`userId`,`token`);
-
---
 -- Indexes for table `vehicles`
 --
 ALTER TABLE `vehicles`
@@ -303,12 +175,6 @@ ALTER TABLE `vehicles`
 --
 
 --
--- AUTO_INCREMENT for table `contributorapplications`
---
-ALTER TABLE `contributorapplications`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
 -- AUTO_INCREMENT for table `lastseen`
 --
 ALTER TABLE `lastseen`
@@ -317,13 +183,6 @@ ALTER TABLE `lastseen`
 --
 -- Constraints for dumped tables
 --
-
---
--- Constraints for table `favouritestops`
---
-ALTER TABLE `favouritestops`
-  ADD CONSTRAINT `favStops_userId` FOREIGN KEY (`userId`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE NO ACTION;
-COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
