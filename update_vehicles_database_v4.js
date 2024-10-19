@@ -105,18 +105,32 @@ function cleanseInvalidTripsInDatabase() {
 
         const list = staticTripIds.map(t => "'" + t + "'").join(",");
 
-        // Rows in vehicleTrips with matching tripIds should be deleted too since they are foreign keys.
+        // Delete invalid/outdated trips in both trips table, and the vehicleTrips association table.
         const query = `
             DELETE FROM trips WHERE id NOT IN(${list});
         `;
 
-        conn.query(query, (err, res) => {
-            if (err) error(err);
+        const query2 = `
+            DELETE FROM tripVehicles WHERE tripId NOT IN (${list});
+        `;
 
-            conn.release();
-            resolve();
+        await new Promise(r => {
+            conn.query(query, (err) => {
+                if (err) {
+                    error(err);
+                }
+
+                conn.query(query2, (err) => {
+                    if (err) {
+                        error(err);
+                    }
+
+                    r();
+                });
+            });
         });
-        
+
+        resolve();
     });
 }
 
