@@ -198,6 +198,7 @@ function updateTrips() {
                 console.warn(`[Trips] ${queryErrors} error(s) occured while updating trip data. First error:`, queryErrors[0]);
             }
 
+            conn.release();
             resolve();
         });
     });
@@ -337,6 +338,7 @@ function updateLastSeenVehicles() {
             }
 
             // Resolve the update function once every vehicle has updated.
+            conn.release();
             resolve();
         });
     });
