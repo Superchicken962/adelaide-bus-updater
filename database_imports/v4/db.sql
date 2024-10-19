@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Oct 14, 2024 at 01:10 PM
+-- Generation Time: Oct 19, 2024 at 10:10 AM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -18,7 +18,7 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 --
--- Database: `adelaide_bus_tracker`
+-- Database: `adelaide_bus_site_new`
 --
 
 -- --------------------------------------------------------
@@ -64,22 +64,8 @@ CREATE TABLE `lastseen` (
   `updateTime` text NOT NULL,
   `startTime` text NOT NULL,
   `shapeId` text NOT NULL,
-  `destination` text NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- --------------------------------------------------------
-
---
--- Table structure for table `stops`
---
-
-CREATE TABLE `stops` (
-  `id` varchar(255) NOT NULL,
-  `code` text NOT NULL,
-  `name` text NOT NULL,
-  `description` text NOT NULL,
-  `latitude` text NOT NULL,
-  `longitude` text NOT NULL
+  `destination` text NOT NULL,
+  `tripStartDate` varchar(10) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -107,7 +93,8 @@ CREATE TABLE `tripvehicles` (
   `tripId` varchar(50) NOT NULL,
   `vehicleId` varchar(255) NOT NULL,
   `vehicleType` varchar(15) NOT NULL,
-  `timestamp` text NOT NULL
+  `timestamp` text NOT NULL,
+  `tripStartDate` varchar(10) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -122,12 +109,20 @@ CREATE TABLE `vehicles` (
   `chassis` text NOT NULL,
   `body` text NOT NULL,
   `livery` text NOT NULL,
-  `operator` text NOT NULL,
-  `lastseenId` int(11) NOT NULL,
-  `firstseenid` int(11) NOT NULL
+  `operator` text NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
+
+--
+-- Table structure for table `vehiclesoutofservice`
+--
+
+CREATE TABLE `vehiclesoutofservice` (
+  `type` text NOT NULL,
+  `id` text NOT NULL,
+  `hide` tinyint(1) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Indexes for dumped tables
@@ -143,14 +138,8 @@ ALTER TABLE `firstseen`
 -- Indexes for table `lastseen`
 --
 ALTER TABLE `lastseen`
-  ADD PRIMARY KEY (`tripId`,`vehicleId`,`vehicleType`),
+  ADD PRIMARY KEY (`tripId`,`vehicleId`,`vehicleType`,`tripStartDate`),
   ADD UNIQUE KEY `id` (`id`);
-
---
--- Indexes for table `stops`
---
-ALTER TABLE `stops`
-  ADD PRIMARY KEY (`id`);
 
 --
 -- Indexes for table `trips`
@@ -162,7 +151,7 @@ ALTER TABLE `trips`
 -- Indexes for table `tripvehicles`
 --
 ALTER TABLE `tripvehicles`
-  ADD PRIMARY KEY (`tripId`,`vehicleId`,`vehicleType`);
+  ADD PRIMARY KEY (`tripId`,`tripStartDate`);
 
 --
 -- Indexes for table `vehicles`
@@ -178,11 +167,18 @@ ALTER TABLE `vehicles`
 -- AUTO_INCREMENT for table `lastseen`
 --
 ALTER TABLE `lastseen`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=35760;
 
 --
 -- Constraints for dumped tables
 --
+
+--
+-- Constraints for table `tripvehicles`
+--
+ALTER TABLE `tripvehicles`
+  ADD CONSTRAINT `tripId_trips` FOREIGN KEY (`tripId`) REFERENCES `trips` (`id`) ON DELETE CASCADE ON UPDATE NO ACTION;
+COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;

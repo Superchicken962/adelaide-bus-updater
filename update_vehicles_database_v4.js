@@ -51,9 +51,9 @@ function Main() {
             DatabasePool = createDatabasePool();
         }
 
-        console.log("Cleansing Basic Trip Updates...");
+        console.log("Cleansing Trip Updates...");
         await cleanseInvalidTripsInDatabase();
-        console.log("Cleansed Basic Trip Updates Table\n");
+        console.log("Cleansed Trip Updates Table\n");
         
         console.log("Reading Stop Times...");
         stopTimes = await readAndStoreStopTimes();
@@ -111,7 +111,7 @@ function cleanseInvalidTripsInDatabase() {
         `;
 
         conn.query(query, (err, res) => {
-            if (err) throw err;
+            if (err) error(err);
 
             conn.release();
             resolve();
@@ -130,14 +130,14 @@ function updateTrips() {
 
         request(reqInfo, async function (err, res, body) {
             if (err || res.statusCode !== 200) {
-                throw new Error("There was an error fetching the trips data.");
+                error(new Error("There was an error fetching the trips data."));
             }
 
             // Decode the protocol buffer.
             const feed = await decodeProto(body);
 
             if (feed.entity.length === 0) {
-                console.clear();
+                // console.clear();
                 console.log("No trip updates data! Ending trips update.");
                 return resolve();
             }
@@ -167,14 +167,14 @@ function updateTrips() {
                 const tripQueryParams = [tripId, tripInfo.trip_headsign, firstStop.arrival_time, lastStop.arrival_time, tripInfo.route_id, trip.tripUpdate.timestamp.low*1000, trip.tripUpdate.timestamp.low*1000];
 
                 const tripVehicleQuery = `
-                    INSERT INTO tripVehicles (tripId, vehicleId, vehicleType, timestamp) VALUES (?, ?, ?, ?)
+                    INSERT INTO tripVehicles (tripId, vehicleId, vehicleType, timestamp, tripStartDate) VALUES (?, ?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE vehicleId = ?, vehicleType = ?, timestamp = ?;
                 `;
                 let vehicleId = trip.tripUpdate.vehicle.id;
                 let vehicleType = getVehicleTypeByRoute(tripInfo.route_id);
                 let tripTs = trip.tripUpdate.timestamp.low*1000;
 
-                const tripVehicleQueryParams = [tripId, vehicleId, vehicleType, tripTs, vehicleId, vehicleType, tripTs];
+                const tripVehicleQueryParams = [tripId, vehicleId, vehicleType, tripTs, trip.tripUpdate.trip.startDate, vehicleId, vehicleType, tripTs];
 
                 // Perform both queries and push any errors to the array. Resolve once the second is finished.
                 await new Promise(r => {
@@ -213,14 +213,14 @@ function updateLastSeenVehicles() {
 
         request(reqInfo, async function (err, res, body) {
             if (err || res.statusCode !== 200) {
-                throw new Error("There was an error fetching the live vehicle data.");
+                error(new Error("There was an error fetching the live vehicle data."));
             }
 
             // Decode the protocol buffer.
             const feed = await decodeProto(body);
 
             if (feed.entity.length === 0) {
-                console.clear();
+                // console.clear();
                 console.log("No Vehicles! Ending last seen update.");
                 return resolve();
             }
@@ -292,7 +292,7 @@ function updateLastSeenVehicles() {
                     vehicleId: vehicle.vehicle.vehicle.id,
                     vehiclePosition: vehicle.vehicle.position,
                     tripStops: tripStops,
-                    tripUpdateTime: Date.now()
+                    tripUpdateTime: Date.now(),
                 };
 
                 const firstStop = tripStops.find(stop => stop.stop_sequence == "1");
@@ -301,15 +301,15 @@ function updateLastSeenVehicles() {
                 // Add data to every column for new lastseen - when updating, only change update timestamps & position info.
                 // (timestamp is directly from the realtime data, and represents when the vehicle had it's data updated. updateTime is our timestamp for when the data was last fetched and updated to the database)
                 const lastseenQuery = `
-                    INSERT INTO lastseen (tripId, route, routeColour, routeTextColour, timestamp, latitude, longitude, bearing, speed, vehicleId, vehicleType, routeStartTime, routeEndTime, updateTime, startTime, shapeId, destination)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO lastseen (tripId, route, routeColour, routeTextColour, timestamp, latitude, longitude, bearing, speed, vehicleId, vehicleType, routeStartTime, routeEndTime, updateTime, startTime, shapeId, destination, tripStartDate)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE timestamp = ?, latitude = ?, longitude = ?, bearing = ?, speed = ?, updateTime = ?;
                 `;
 
                 const lastseenParams = [
                     lastseenDetails.tripId, lastseenDetails.routeId, lastseenDetails.routeColour, lastseenDetails.routeTextColour, info.timestamp*1000, 
                     info.position.latitude, info.position.longitude, info.position.bearing, info.position.speed, info.vehicle_id, info.vehicle_type, (firstStop.arrival_time || null), (lastStop.arrival_time || null),
-                    lastseenDetails.tripUpdateTime, info.timestamp*1000, lastseenDetails.tripShapeId, lastseenDetails.tripHeadsign,
+                    lastseenDetails.tripUpdateTime, info.timestamp*1000, lastseenDetails.tripShapeId, lastseenDetails.tripHeadsign, info.trip.startDate,
                     info.timestamp*1000, info.position.latitude, info.position.longitude, info.position.bearing, info.position.speed, lastseenDetails.tripUpdateTime
                 ];
 
@@ -352,7 +352,7 @@ function cleanseLastSeenVehicles() {
         `;
 
         conn.query(getQuery, async(err, res) => {
-            if (err) throw err;
+            if (err) error(err);
             
             // Await all queries for each vehicle.
             await Promise.all(res.map(async(vehicle) => {
@@ -372,7 +372,7 @@ function cleanseLastSeenVehicles() {
                     `;
 
                     conn.query(query, [vehicle.id, vehicle.type, vehicle.id, vehicle.type], (err, res) => {
-                        if (err) throw err;
+                        if (err) error(err);
 
                         // Resolve this loop when query is done.
                         r();
@@ -385,6 +385,11 @@ function cleanseLastSeenVehicles() {
             resolve();
         });
     });
+}
+
+function error(err) {
+    console.error(err);
+    process.exit(0);
 }
 
 function getVehicleTypeByRoute(route) {
@@ -504,7 +509,7 @@ function getDatabaseConnection() {
     return new Promise((resolve) => {
         DatabasePool.getConnection((err, conn) => {
             if (err) {
-                throw new Error("Error getting database connection!");
+                error(new Error("Error getting database connection!"));
             }
 
             resolve(conn);
@@ -554,7 +559,7 @@ function returnFeedEntityLength(url = "https://gtfs.adelaidemetro.com.au/v1/real
     
         request(options, async function (err, res, body) {
             if (err || res.statusCode !== 200) {
-                throw new Error("There was an error fetching data.");
+                error(new Error("There was an error fetching data."));
             }
     
             const feed = await decodeProto(body); // decode the protocol buffer
