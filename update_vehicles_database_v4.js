@@ -10,6 +10,17 @@ const es = require("event-stream");
 const fs = require("node:fs");
 const isProduction = !!require("./config.json").production;
 
+/**
+ * Maximum last seen trips for vehicle to record.
+ */
+const MAX_VEHICLE_LAST_SEEN = 24;
+
+/**
+ * Maximum vehicles/days recorded for a trip in tripvehicles at one time - set to 0 for no limit.
+ */
+const MAX_TRIP_LIFETIME = 16;
+
+
 // Pool will be initialised when we confirm there is stuff to edit so we do not waste connections.
 let DatabasePool = null;
 
@@ -55,6 +66,13 @@ function Main() {
         await cleanseInvalidTripsInDatabase();
         console.log("Cleansed Trip Updates Table\n");
         
+        // Only delete expired trips if value is greater than 0.
+        if (MAX_TRIP_LIFETIME > 0) {
+            console.log("Deleting expired data from tripvehicles...");
+            await removeExpiredTrips();
+            console.log("Deleted expired data from tripvehicles\n");
+        }
+
         console.log("Reading Stop Times...");
         stopTimes = await readAndStoreStopTimes();
         console.log("Read and Stored Stop Times\n");
@@ -111,7 +129,7 @@ function cleanseInvalidTripsInDatabase() {
         `;
 
         const query2 = `
-            DELETE FROM tripVehicles WHERE tripId NOT IN (${list});
+            DELETE FROM tripvehicles WHERE tripId NOT IN (${list});
         `;
 
         await new Promise(r => {
@@ -130,8 +148,37 @@ function cleanseInvalidTripsInDatabase() {
             });
         });
 
+        conn.release();
         resolve();
     });
+}
+
+/**
+ * Removes expired trips from database (tripvehicles).
+ */
+async function removeExpiredTrips() {
+    const conn = await getDatabaseConnection();
+
+    // Set expiry date to be time ago as specified in constant - if rows are older than this, they will be deleted.
+    const expiryPoint = new Date();
+    expiryPoint.setDate(expiryPoint.getDate() - MAX_TRIP_LIFETIME);
+
+    // Delete rows where the timestamp is less than the threshold - threshold is the minimum date.
+    const query = `
+        DELETE FROM tripvehicles
+        WHERE timestamp <= ${expiryPoint.getTime()};
+    `;
+
+    await conn.query(query, (err) => {
+        if (err) {
+            error(err);
+            return false;
+        }
+    });
+
+    conn.release();
+
+    return true;
 }
 
 function updateTrips() {
@@ -181,7 +228,7 @@ function updateTrips() {
                 const tripQueryParams = [tripId, tripInfo.trip_headsign, firstStop.arrival_time, lastStop.arrival_time, tripInfo.route_id, trip.tripUpdate.timestamp.low*1000, trip.tripUpdate.timestamp.low*1000];
 
                 const tripVehicleQuery = `
-                    INSERT INTO tripVehicles (tripId, vehicleId, vehicleType, timestamp, tripStartDate) VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO tripvehicles (tripId, vehicleId, vehicleType, timestamp, tripStartDate) VALUES (?, ?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE vehicleId = ?, vehicleType = ?, timestamp = ?;
                 `;
                 let vehicleId = trip.tripUpdate.vehicle.id;
@@ -382,7 +429,7 @@ function cleanseLastSeenVehicles() {
                                 SELECT id FROM lastseen
                                 WHERE vehicleId = ? AND vehicleType = ?
                                 ORDER BY timestamp DESC
-                                LIMIT 12
+                                LIMIT ${MAX_VEHICLE_LAST_SEEN}
                             ) AS a
                         ) AND vehicleId = ? AND vehicleType = ?;
                     `;
