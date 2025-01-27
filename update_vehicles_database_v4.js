@@ -16,9 +16,9 @@ const isProduction = !!require("./config.json").production;
 const MAX_VEHICLE_LAST_SEEN = 24;
 
 /**
- * Maximum vehicles/days recorded for a trip in tripvehicles at one time - set to 0 for no limit.
+ * Maximum vehicles recorded for a trip in tripvehicles at one time - set to 0 for no limit.
  */
-const MAX_TRIP_LIFETIME = 16;
+const MAX_TRIP_VEHICLES_HISTORY = 16;
 
 
 // Pool will be initialised when we confirm there is stuff to edit so we do not waste connections.
@@ -27,6 +27,11 @@ let DatabasePool = null;
 const ScriptRerunTimeout = 50000;
 const ScriptMaxRunsBeforeExit = 55; // 0 for no limit
 let ScriptTimesRan = 0;
+
+/**
+ * Script cycle interval to run table cleanses on (always runs on first cycle).
+ */
+const cleanseCycleInterval = 12;
 
 let stopTimes = {};
 
@@ -38,7 +43,9 @@ function createDatabasePool() {
 Main();
 
 function Main() {
-    updateStaticFiles().then(async(err) => {
+    updateStaticFiles().then(async(result) => {
+        const { err, updated } = result;
+
         if (err) {
             console.log("Error in static file updating process: ", err);
             setTimeout(() => {
@@ -53,7 +60,7 @@ function Main() {
             console.log("No live data - nothing to update. Ending process in 3 minutes.");
             setTimeout(() => {
                 process.exit(0);
-            }, 18000);
+            }, 180000);
             return;
         }
 
@@ -62,24 +69,35 @@ function Main() {
             DatabasePool = createDatabasePool();
         }
 
-        console.log("Cleansing Trip Updates...");
-        await cleanseInvalidTripsInDatabase();
-        console.log("Cleansed Trip Updates Table\n");
-        
-        // Only delete expired trips if value is greater than 0.
-        if (MAX_TRIP_LIFETIME > 0) {
-            console.log("Deleting expired data from tripvehicles...");
-            await removeExpiredTrips();
-            console.log("Deleted expired data from tripvehicles\n");
+        // Run cleanse functions if the interval is a "cleanse cycle" - eg. every 12 iterations it will run.
+        const isCleanseCycle = ((ScriptTimesRan/cleanseCycleInterval) % 1 === 0);
+        if (isCleanseCycle) {
+            console.log("\n===== Cleanse Cycle =====\n");
+
+            console.log("Cleansing Trip Updates...");
+            await cleanseInvalidTripsInDatabase();
+            console.log("Cleansed Trip Updates Table\n");
+
+            // Only delete expired trips if value is greater than 0.
+            if (MAX_TRIP_VEHICLES_HISTORY > 0) {
+                console.log("Deleting expired data from tripvehicles...");
+                await removeExpiredTrips();
+                console.log("Deleted expired data from tripvehicles\n");
+            }
+
+            console.log("Cleansing Last Seen Vehicles...");
+            await cleanseLastSeenVehicles();
+            console.log("Cleansed Last Seen Vehicles...\n");
+
+            console.log("=========================\n");
         }
-
-        console.log("Reading Stop Times...");
-        stopTimes = await readAndStoreStopTimes();
-        console.log("Read and Stored Stop Times\n");
-
-        console.log("Cleansing Last Seen Vehicles...");
-        await cleanseLastSeenVehicles();
-        console.log("Cleansed Last Seen Vehicles...");
+        
+        // Only update stop times again if there is no data, or if the static files were just updated.
+        if (Object.values(stopTimes).length > 0 && updated) {
+            console.log("Reading Stop Times...");
+            stopTimes = await readAndStoreStopTimes();
+            console.log("Read and Stored Stop Times\n");
+        }
 
         console.log("Updating Last Seen Vehicles...");
         await updateLastSeenVehicles();
@@ -87,7 +105,7 @@ function Main() {
 
         console.log("Updating Trip Updates...");
         await updateTrips();
-        console.log("Updated Basic Trip Updates");
+        console.log("Updated Basic Trip Updates\n");
 
         ScriptTimesRan += 1;
 
@@ -161,9 +179,10 @@ async function removeExpiredTrips() {
 
     // Set expiry date to be time ago as specified in constant - if rows are older than this, they will be deleted.
     const expiryPoint = new Date();
-    expiryPoint.setDate(expiryPoint.getDate() - MAX_TRIP_LIFETIME);
+    expiryPoint.setDate(expiryPoint.getDate() - MAX_TRIP_VEHICLES_HISTORY);
 
     // Delete rows where the timestamp is less than the threshold - threshold is the minimum date.
+    // TODO: Change this from a date timeframe into a length/count check.
     const query = `
         DELETE FROM tripvehicles
         WHERE timestamp <= ${expiryPoint.getTime()};
@@ -216,7 +235,6 @@ function updateTrips() {
                 let tripInfo = getTripById(tripId, tripsTxt);
 
                 let tripStops = stopTimes[tripId] || [];
-                tripStops = tripStops.map(trip => formatStopTimesData(trip.split(",")));
 
                 const firstStop = tripStops.find(stop => stop.stop_sequence == "1");
                 const lastStop = tripStops.find(stop => stop.stop_sequence == "999");
@@ -341,7 +359,6 @@ function updateLastSeenVehicles() {
 
                 // Get stop times for this trip.
                 let tripStops = stopTimes[vehicle.vehicle.trip.tripId] || [];
-                tripStops = tripStops.map(trip => formatStopTimesData(trip.split(",")));
 
                 const lastseenDetails = {
                     tripId: vehicle.vehicle.trip.tripId,
@@ -370,7 +387,7 @@ function updateLastSeenVehicles() {
 
                 const lastseenParams = [
                     lastseenDetails.tripId, lastseenDetails.routeId, lastseenDetails.routeColour, lastseenDetails.routeTextColour, info.timestamp*1000, 
-                    info.position.latitude, info.position.longitude, info.position.bearing, info.position.speed, info.vehicle_id, info.vehicle_type, (firstStop.arrival_time || null), (lastStop.arrival_time || null),
+                    info.position.latitude, info.position.longitude, info.position.bearing, info.position.speed, info.vehicle_id, info.vehicle_type, (firstStop?.arrival_time || "00:00:00"), (lastStop?.arrival_time || "00:00:00"),
                     lastseenDetails.tripUpdateTime, info.timestamp*1000, lastseenDetails.tripShapeId, lastseenDetails.tripHeadsign, info.trip.startDate,
                     info.timestamp*1000, info.position.latitude, info.position.longitude, info.position.bearing, info.position.speed, lastseenDetails.tripUpdateTime
                 ];
@@ -587,9 +604,11 @@ function readAndStoreStopTimes() {
         stream.pipe(es.split())
     
         .on("data", (line) => {
-            let current_tripid = line.split(",")[0];
-            result[current_tripid] = (result[current_tripid] || []);
-            result[current_tripid].push(line);
+            const currTripId = line.split(",")[0];
+            const data = formatStopTimesData(line.split(","));
+
+            result[currTripId] = (result[currTripId] || []);
+            result[currTripId].push(data);
         })
     
         .on("end", () => {
