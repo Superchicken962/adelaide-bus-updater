@@ -24,7 +24,7 @@ const MAX_TRIP_VEHICLES_HISTORY = 16;
 // Pool will be initialised when we confirm there is stuff to edit so we do not waste connections.
 let DatabasePool = null;
 
-const ScriptRerunTimeout = 50000;
+const ScriptRerunTimeout = 35000;
 const ScriptMaxRunsBeforeExit = 55; // 0 for no limit
 let ScriptTimesRan = 0;
 
@@ -93,7 +93,7 @@ function Main() {
         }
         
         // Only update stop times again if there is no data, or if the static files were just updated.
-        if (Object.values(stopTimes).length > 0 && updated) {
+        if (Object.values(stopTimes).length === 0 || updated) {
             console.log("Reading Stop Times...");
             stopTimes = await readAndStoreStopTimes();
             console.log("Read and Stored Stop Times\n");
@@ -377,19 +377,23 @@ function updateLastSeenVehicles() {
                 const firstStop = tripStops.find(stop => stop.stop_sequence == "1");
                 const lastStop = tripStops.find(stop => stop.stop_sequence == "999");
 
+                // TODO: Perhaps do a check to ensure trip is the correct trip - some last seen are incorrect and show the vehicle at the start destination.
+                // Maybe we could only add the lastseen if the vehicle has gone past 1 or 2 stops.
+
                 // Add data to every column for new lastseen - when updating, only change update timestamps & position info.
                 // (timestamp is directly from the realtime data, and represents when the vehicle had it's data updated. updateTime is our timestamp for when the data was last fetched and updated to the database)
                 const lastseenQuery = `
                     INSERT INTO lastseen (tripId, route, routeColour, routeTextColour, timestamp, latitude, longitude, bearing, speed, vehicleId, vehicleType, routeStartTime, routeEndTime, updateTime, startTime, shapeId, destination, tripStartDate)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE timestamp = ?, latitude = ?, longitude = ?, bearing = ?, speed = ?, updateTime = ?;
+                    ON DUPLICATE KEY UPDATE timestamp = ?, latitude = ?, longitude = ?, bearing = ?, speed = ?, updateTime = ?, routeStartTime = ?, routeEndTime = ?;
                 `;
 
                 const lastseenParams = [
                     lastseenDetails.tripId, lastseenDetails.routeId, lastseenDetails.routeColour, lastseenDetails.routeTextColour, info.timestamp*1000, 
                     info.position.latitude, info.position.longitude, info.position.bearing, info.position.speed, info.vehicle_id, info.vehicle_type, (firstStop?.arrival_time || "00:00:00"), (lastStop?.arrival_time || "00:00:00"),
                     lastseenDetails.tripUpdateTime, info.timestamp*1000, lastseenDetails.tripShapeId, lastseenDetails.tripHeadsign, info.trip.startDate,
-                    info.timestamp*1000, info.position.latitude, info.position.longitude, info.position.bearing, info.position.speed, lastseenDetails.tripUpdateTime
+                    info.timestamp*1000, info.position.latitude, info.position.longitude, info.position.bearing, info.position.speed, lastseenDetails.tripUpdateTime,
+                    (firstStop?.arrival_time || "00:00:00"), (lastStop?.arrival_time || "00:00:00")
                 ];
 
                 // Await query completion.
@@ -709,3 +713,13 @@ function formatStopTimesData(stopTimes) {
         "timepoint" : stopTimes[9]
     };
 }
+
+// Ensure process exits on error - so it can then restart.
+process.on("unhandledRejection", (e) => {
+    console.error("unhandledRejection:", e);
+    process.exit(1);
+});
+process.on("uncaughtException", (e) => {
+    console.error("uncaughtException:", e);
+    process.exit(1);
+});
