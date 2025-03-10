@@ -5,7 +5,7 @@
 const request = require("request");
 const protos = require("google-proto-files");
 const mysql = require("mysql");
-const { updateStaticFiles, getStaticFileSync, getStopTimesForTrips } = require("./static-files");
+const { updateStaticFiles, getStaticFileSync, getStopTimesForTrips, getVehicleType } = require("./static-files");
 const es = require("event-stream");
 const fs = require("node:fs");
 const isProduction = !!require("./config.json").production;
@@ -25,13 +25,13 @@ const MAX_TRIP_VEHICLES_HISTORY = 16;
 let DatabasePool = null;
 
 const ScriptRerunTimeout = 35000;
-const ScriptMaxRunsBeforeExit = 55; // 0 for no limit
+const ScriptMaxRunsBeforeExit = 56; // 0 for no limit
 let ScriptTimesRan = 0;
 
 /**
  * Script cycle interval to run table cleanses on (always runs on first cycle).
  */
-const cleanseCycleInterval = 12;
+const cleanseCycleInterval = 55;
 
 let stopTimes = {};
 
@@ -225,6 +225,7 @@ function updateTrips() {
             const tripIds = feed.entity.map(t => t.tripUpdate.trip.tripId);
     
             const tripsTxt = getStaticFileSync("trips.txt");
+            const routesTxt = getStaticFileSync("routes.txt");
 
             const queryErrors = [];
             const conn = await getDatabaseConnection();
@@ -233,6 +234,7 @@ function updateTrips() {
                 let tripId = trip.tripUpdate.trip.tripId;
 
                 let tripInfo = getTripById(tripId, tripsTxt);
+                let routeInfo = getRouteById(tripInfo?.route_id, routesTxt);
 
                 let tripStops = stopTimes[tripId] || [];
 
@@ -250,7 +252,8 @@ function updateTrips() {
                     ON DUPLICATE KEY UPDATE vehicleId = ?, vehicleType = ?, timestamp = ?;
                 `;
                 let vehicleId = trip.tripUpdate.vehicle.id;
-                let vehicleType = getVehicleTypeByRoute(tripInfo.route_id);
+                const vehicleType = getVehicleType(routeInfo);
+
                 let tripTs = trip.tripUpdate.timestamp.low*1000;
 
                 const tripVehicleQueryParams = [tripId, vehicleId, vehicleType, tripTs, trip.tripUpdate.trip.startDate, vehicleId, vehicleType, tripTs];
@@ -319,8 +322,6 @@ function updateLastSeenVehicles() {
 
             // Wait for all vehicles to update.
             await Promise.all(feed.entity.map(async(vehicle) => {
-                const type = getVehicleTypeByRoute(vehicle.vehicle.trip.routeId);
-    
                 const info = {
                     position: vehicle.vehicle.position,
                     trip: vehicle.vehicle.trip,
@@ -328,11 +329,13 @@ function updateLastSeenVehicles() {
                     vehicle_label: vehicle.vehicle.vehicle.label,
                     wheelchair_accessible: vehicle.vehicle.vehicle[".transit_realtime.tfnswVehicleDescriptor"],
                     timestamp: vehicle.vehicle.timestamp.low,
-                    vehicle_type: type
+                    vehicle_type: ""
                 };
 
                 let tripInfo = getTripById(vehicle.vehicle.trip.tripId, tripsTxt);
                 let routeInfo = getRouteById(vehicle.vehicle.trip.routeId, routesTxt);
+
+                info.vehicle_type = getVehicleType(routeInfo);
 
                 let operatorToSet = null;
 
@@ -474,42 +477,6 @@ function cleanseLastSeenVehicles() {
 function error(err) {
     console.error(err);
     process.exit(0);
-}
-
-function getVehicleTypeByRoute(route) {
-    const trams = [
-        "FESTVL",
-        "GLNELG",
-        "BTANIC",
-        "WOMAD",
-        "ADLOOP"
-    ];
-    const trains = [
-        "BEL",
-        "FLNDRS",
-        "GAW",
-        "GAWC",
-        "GLAN",
-        "GRNG",
-        "NOAR",
-        "OSBORN",
-        "OUTHA",
-        "SALIS",
-        "SEAFRD",
-        "PTDOCK"
-    ];
-
-    let type;
-
-    if (trams.includes(route)) {
-        type = "tram";
-    } else if (trains.includes(route)) {
-        type = "train";
-    } else {
-        type = "bus";
-    }
-
-    return type;
 }
 
 function getTripById(tripId, fileContent) {

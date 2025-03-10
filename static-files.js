@@ -152,10 +152,34 @@ function getStopTimesForTrips(trips_array) {
     });
 }
 
+const ROUTE_TYPES = Object.freeze({
+    TRAM: 0,
+    TRAIN: 2,
+    BUS: 3,
+    "0": "Tram",
+    "2": "Train",
+    "3": "Bus"
+});
+
+/**
+ * Resolves route_type from route information into a vehicle type.
+ * 
+ * @param { Object | String } route - Route info object, or route_type string.
+ * @return { String } Resolved type.
+ */
+function getVehicleType(route) {
+    const routeType = (typeof route === "object") ? route.route_type : route;
+
+    const vehicleType = ROUTE_TYPES[routeType] || "Unknown";
+
+    return vehicleType.toLowerCase();
+}
+
 module.exports = {
     updateStaticFiles,
     getStaticFile,
     getStaticFileSync,
     getStopTimesByTripId,
-    getStopTimesForTrips
+    getStopTimesForTrips,
+    getVehicleType
 };
